@@ -1,0 +1,68 @@
+<!doctype html>
+<!-- World Radio player page: a plain audio player (no picture). The World Radio snippet opens this page,
+     hidden, and controls it from the world. Host it next to world-radio.js. -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>World Radio Player</title>
+  <style>html, body { margin: 0; background: #000; }</style>
+</head>
+<body>
+  <audio id="a" preload="auto"></audio>
+  <script>
+  (function () {
+    var a = document.getElementById("a");
+    var cur = null, live = false, err = false, wantPlay = false;
+    a.addEventListener("error", function () { if (a.src) err = true; });
+    a.addEventListener("playing", function () { err = false; });
+
+    function load(url, at, play, isLive) {
+      cur = url || null; live = !!isLive; err = false; wantPlay = !!play;
+      if (!url) { a.pause(); a.removeAttribute("src"); a.load(); return; }
+      a.src = url;
+      if (!live && at > 0) {
+        var seek = function () { try { a.currentTime = at; } catch (e) {} a.removeEventListener("loadedmetadata", seek); };
+        a.addEventListener("loadedmetadata", seek);
+      }
+      if (play) { var p = a.play(); if (p && p.catch) p.catch(function () {}); }
+    }
+
+    // Volume glides to the target the world sends (no steps), and stays there
+    var volTarget = null, volNow = null;
+    setInterval(function () {
+      if (volTarget === null) return;
+      if (volNow === null) volNow = volTarget;
+      volNow += (volTarget - volNow) * 0.15;
+      if (Math.abs(volTarget - volNow) < 0.004) volNow = volTarget;
+      if (Math.abs(a.volume - volNow) > 0.003) a.volume = Math.max(0, Math.min(1, volNow));
+    }, 50);
+
+    window.__wr = {
+      load: load,
+      play: function () {
+        wantPlay = true;
+        if (live && cur) { a.src = cur; }                 // a live stream rejoins "now", not where it stopped
+        var p = a.play(); if (p && p.catch) p.catch(function () {});
+      },
+      pause: function () { wantPlay = false; a.pause(); },
+      seek: function (t) { if (!live && isFinite(t)) try { a.currentTime = Math.max(0, t); } catch (e) {} },
+      vol: function (x) { if (isFinite(x)) volTarget = Math.max(0, Math.min(1, x)); },
+    };
+    window.addEventListener("bsmessage", function (e) {
+      try { var m = JSON.parse(e.detail.message); if (m && typeof m.wrvol === "number") window.__wr.vol(m.wrvol); } catch (x) {}
+    });
+
+    // Once a second: tell the world what's playing and where it is
+    setInterval(function () {
+      try {
+        if (!window.O || typeof window.O.sendMessage !== "function") return;
+        window.O.sendMessage("app", JSON.stringify({
+          from: "wr", url: cur, t: a.currentTime || 0, d: live ? null : (isFinite(a.duration) ? a.duration : null),
+          paused: a.paused, ended: !live && a.ended, err: err, live: live,
+        }));
+      } catch (e) {}
+    }, 1000);
+  })();
+  </script>
+</body>
+</html>
